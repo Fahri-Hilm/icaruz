@@ -47,7 +47,9 @@ pub fn parse_masterlist_text(input: &str, fallback_port: u16) -> Vec<ServerEntry
 pub fn parse_masterlist_json(input: &str, fallback_port: u16) -> Result<Vec<ServerEntry>, String> {
     let v: serde_json::Value =
         serde_json::from_str(input).map_err(|e| format!("Masterlist JSON invalid: {e}"))?;
-    let arr = v.as_array().ok_or("Masterlist JSON must be an array.".to_string())?;
+    let arr = v
+        .as_array()
+        .ok_or("Masterlist JSON must be an array.".to_string())?;
     let mut out = Vec::new();
     for item in arr {
         match item {
@@ -115,9 +117,7 @@ pub fn dedup_servers(servers: Vec<ServerEntry>) -> Vec<ServerEntry> {
 
 pub trait ServerProvider: Send + Sync {
     fn name(&self) -> &str;
-    fn fetch(
-        &self,
-    ) -> impl std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send;
+    fn fetch(&self) -> impl std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send;
 }
 
 pub struct MasterlistProvider {
@@ -321,7 +321,9 @@ pub trait QuerySource: Send + Sync {
     fn name(&self) -> &str;
     fn fetch_box(
         &self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>>;
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>,
+    >;
 }
 
 impl QuerySource for MasterlistProvider {
@@ -330,7 +332,9 @@ impl QuerySource for MasterlistProvider {
     }
     fn fetch_box(
         &self,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>> {
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>,
+    > {
         Box::pin(async move { ServerProvider::fetch(self).await })
     }
 }
@@ -416,7 +420,9 @@ mod tests {
         }
         fn fetch_box(
             &self,
-        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>> {
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<ServerEntry>, String>> + Send + '_>,
+        > {
             let r = self.r.clone();
             Box::pin(async move { r })
         }

@@ -42,7 +42,8 @@ fn item(
 }
 
 pub fn av_policy_text() -> String {
-    "Launcher never disables antivirus or firewall. If a file is flagged, review it by hand first.".to_string()
+    "Launcher never disables antivirus or firewall. If a file is flagged, review it by hand first."
+        .to_string()
 }
 
 #[cfg(target_os = "windows")]
@@ -52,6 +53,7 @@ fn system_file(name: &str) -> bool {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn system_file(_name: &str) -> bool {
     false
 }

@@ -1,8 +1,8 @@
-use std::path::{Path, PathBuf};
 use crate::{ClientKind, GameInstall};
 use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{BufReader, Read};
+use std::path::{Path, PathBuf};
 
 pub fn find_exe(gta_path: &Path) -> PathBuf {
     gta_path.join("gta_sa.exe")
@@ -61,11 +61,7 @@ pub fn client_exe_name(kind: &ClientKind) -> &'static str {
 // Minimal hex helper to avoid extra dep at core level.
 mod hex {
     pub fn encode(bytes: impl AsRef<[u8]>) -> String {
-        bytes
-            .as_ref()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect()
+        bytes.as_ref().iter().map(|b| format!("{b:02x}")).collect()
     }
 }
 

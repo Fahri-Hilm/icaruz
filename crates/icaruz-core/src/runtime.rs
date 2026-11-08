@@ -71,10 +71,7 @@ fn ensure_under_base(base: &Path, path: &Path) -> Result<(), String> {
 // Only immutable vendor files may use hardlink. Mutable configs always copy.
 pub fn is_immutable_file(path: &Path) -> bool {
     match path.extension().and_then(|e| e.to_str()) {
-        Some(ext) => matches!(
-            ext.to_lowercase().as_str(),
-            "exe" | "dll" | "asi" | "flt"
-        ),
+        Some(ext) => matches!(ext.to_lowercase().as_str(), "exe" | "dll" | "asi" | "flt"),
         None => false,
     }
 }
@@ -83,10 +80,8 @@ pub fn link_or_copy_immutable(src: &Path, dst: &Path) -> Result<(), String> {
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create dir: {e}"))?;
     }
-    if is_immutable_file(src) {
-        if std::fs::hard_link(src, dst).is_ok() {
-            return Ok(());
-        }
+    if is_immutable_file(src) && std::fs::hard_link(src, dst).is_ok() {
+        return Ok(());
     }
     std::fs::copy(src, dst).map_err(|e| format!("Cannot copy file: {e}"))?;
     Ok(())
@@ -103,7 +98,11 @@ pub fn prepare_staging(base: &Path, kind: &ClientKind, profile: &str) -> Result<
 }
 
 // Atomic replace via rename. Never touches GTA folder, only runtime base.
-pub fn commit_staging(base: &Path, kind: &ClientKind, profile: &str) -> Result<RollbackMarker, String> {
+pub fn commit_staging(
+    base: &Path,
+    kind: &ClientKind,
+    profile: &str,
+) -> Result<RollbackMarker, String> {
     let st = staging_dir(base, kind, profile);
     let target = runtime_dir(base, kind, profile);
     let backup = backup_dir(base, kind, profile);
@@ -156,7 +155,8 @@ pub fn write_rollback(
 ) -> Result<(), String> {
     let f = rollback_file(base, kind, profile);
     ensure_under_base(base, &f)?;
-    let json = serde_json::to_string_pretty(marker).map_err(|e| format!("Rollback encode failed: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(marker).map_err(|e| format!("Rollback encode failed: {e}"))?;
     std::fs::write(&f, json).map_err(|e| format!("Rollback write failed: {e}"))?;
     Ok(())
 }
@@ -204,7 +204,9 @@ mod tests {
         std::fs::write(st.join("settings.ini"), "nick=x").unwrap();
         let m1 = commit_staging(&base, &kind, "main").unwrap();
         assert!(!m1.had_previous);
-        assert!(runtime_dir(&base, &kind, "main").join("settings.ini").exists());
+        assert!(runtime_dir(&base, &kind, "main")
+            .join("settings.ini")
+            .exists());
         let st2 = prepare_staging(&base, &kind, "main").unwrap();
         std::fs::write(st2.join("settings.ini"), "nick=y").unwrap();
         let m2 = commit_staging(&base, &kind, "main").unwrap();

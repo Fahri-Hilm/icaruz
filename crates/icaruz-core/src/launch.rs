@@ -5,7 +5,8 @@ pub fn parse_server(input: &str, fallback_port: u16) -> Result<(String, u16), St
     }
     // Accept "ip:port" or bare ip/host with fallback port.
     if let Some((host, port_str)) = s.rsplit_once(':') {
-        if !host.is_empty() && !port_str.is_empty() && port_str.chars().all(|c| c.is_ascii_digit()) {
+        if !host.is_empty() && !port_str.is_empty() && port_str.chars().all(|c| c.is_ascii_digit())
+        {
             let port: u16 = port_str
                 .parse()
                 .map_err(|_| "Port must be 1 to 65535.".to_string())?;

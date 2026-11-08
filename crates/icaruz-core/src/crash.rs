@@ -47,7 +47,7 @@ fn short_module_name(line: &str) -> Option<String> {
         if let Some(pos) = low.find(ext) {
             let end = pos + ext.len();
             let start = line[..pos]
-                .rfind(|c: char| c == '\\' || c == '/' || c == ' ' || c == '"' || c == '\'')
+                .rfind(|c: char| ['\\', '/', ' ', '"', '\''].contains(&c))
                 .map(|i| i + 1)
                 .unwrap_or(0);
             let name = line[start..end.min(line.len())].trim().to_string();
@@ -144,7 +144,12 @@ pub fn find_wer_files(gta_path: &Path) -> Vec<PathBuf> {
 pub fn build_signature(exit_code: i32, info: Option<&CrashInfo>) -> String {
     let mut base = format!("exit={exit_code}");
     if let Some(i) = info {
-        let top = i.modules.first().cloned().unwrap_or_default().to_lowercase();
+        let top = i
+            .modules
+            .first()
+            .cloned()
+            .unwrap_or_default()
+            .to_lowercase();
         base.push_str(&format!("|exc={}|mod={}", i.exception.to_lowercase(), top));
     }
     let mut h = Sha256::new();
@@ -180,7 +185,9 @@ pub fn build_report(gta_path: &Path, exit_code: i32) -> CrashReport {
         wer_files,
         signature,
         confidence,
-        note: "Module listed is possibly related, not proven cause. Verify with clean install test.".to_string(),
+        note:
+            "Module listed is possibly related, not proven cause. Verify with clean install test."
+                .to_string(),
     }
 }
 

@@ -68,8 +68,8 @@ pub fn save_workspace(base: &Path, ws: &ServerWorkspace) -> Result<PathBuf, Stri
     let mut stamped = ws.clone();
     stamped.updated_at = now_stamp();
     let f = workspace_file(base, &ws.address, ws.port);
-    let json =
-        serde_json::to_string_pretty(&stamped).map_err(|e| format!("Workspace encode failed: {e}"))?;
+    let json = serde_json::to_string_pretty(&stamped)
+        .map_err(|e| format!("Workspace encode failed: {e}"))?;
     std::fs::write(&f, json).map_err(|e| format!("Workspace write failed: {e}"))?;
     Ok(f)
 }
