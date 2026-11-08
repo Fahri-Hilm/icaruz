@@ -21,6 +21,7 @@
 
 <svelte:window onkeydown={onKey} />
 
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <div class="backdrop" onclick={onClose} role="presentation">
   <div
     class="dialog"
@@ -39,6 +40,7 @@
     <p class="muted">Log paths stay on your PC. User folder names are hidden before copy.</p>
     {#if copied}<p role="status" class="muted">{copied}</p>{/if}
     <div class="row">
+      <!-- svelte-ignore a11y_autofocus -->
       <button class="primary" onclick={onOpenRepair} autofocus>Open repair</button>
       <button onclick={onCopy}>Copy details</button>
       <button onclick={onClose}>Close (Esc)</button>
