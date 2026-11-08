@@ -1,0 +1,3 @@
+[workspace]
+members = ["src-tauri", "crates/icaruz-core"]
+resolver = "2"
