@@ -84,6 +84,52 @@ fn build_launch_args(ip: String, port: u16, nick: String) -> Result<Vec<String>,
     ])
 }
 
+#[tauri::command]
+fn download_client(
+    url: String,
+    sha256: String,
+    filename: String,
+    size_bytes: u64,
+) -> Result<String, String> {
+    let spec = content::DownloadSpec {
+        url,
+        sha256,
+        filename,
+        size_bytes,
+    };
+    let hosts = content::default_trusted_hosts();
+    content::validate_spec(&spec, &hosts)?;
+    let data = icaruz_core::data_dir();
+    let staging = content::staging_path(&data, &spec.filename);
+    if let Some(parent) = staging.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot prep staging: {e}"))?;
+    }
+    let dest = content::final_path(&data, &spec.filename);
+    content::gate_auto_execute(&dest, false)?;
+    let offset = content::resume_offset(&staging);
+    let p = content::progress_for(offset, spec.size_bytes);
+    Ok(format!(
+        "Spec OK. Staging ready at {} resume {} of {} bytes ({:.1}%). Copy bytes then verify sha256 before install. No auto execute.",
+        staging.display(),
+        p.downloaded,
+        p.total,
+        p.percent
+    ))
+}
+
+#[tauri::command]
+fn repair_check(gta_path: String) -> Result<Vec<repair::RepairItem>, String> {
+    Ok(repair::repair_check(std::path::Path::new(&gta_path)))
+}
+
+#[tauri::command]
+fn crash_report(gta_path: String, exit_code: i32) -> Result<crash::CrashReport, String> {
+    Ok(crash::build_report(
+        std::path::Path::new(&gta_path),
+        exit_code,
+    ))
+}
+
 #[tauri::command(async)]
 async fn launch_game(
     req: LaunchRequest,
@@ -131,7 +177,10 @@ fn main() {
             set_nickname,
             build_launch_args,
             plan_launch,
-            launch_game
+            launch_game,
+            download_client,
+            repair_check,
+            crash_report
         ])
         .run(tauri::generate_context!())
         .expect("ICARUZ failed to start");
