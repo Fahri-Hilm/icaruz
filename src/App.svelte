@@ -19,6 +19,7 @@
   let phase: Phase = "idle";
   let phaseMsg = "";
   let notice = "";
+  let webviewMsg = "";
   let saveMsg = "";
   let showRepair = false;
   let showCrash = false;
@@ -60,6 +61,12 @@
     } catch {
       status = "Tauri IPC not available in browser preview.";
       notice = "GTA San Andreas folder not set yet.";
+    }
+    try {
+      const wv = (await invoke("webview_status")) as { installed: boolean; detail: string };
+      webviewMsg = wv.installed ? "" : wv.detail;
+    } catch {
+      webviewMsg = "";
     }
     try {
       const savedNick = localStorage.getItem("icaruz-nick");
@@ -165,7 +172,7 @@
 
   <main class="main">
     {#if page === "home"}
-      <Home bind:gtaPath bind:nickname bind:serverInput {phase} {phaseMsg} {notice} {status} {gtaDetail} {onDetect} {onPlay} />
+      <Home bind:gtaPath bind:nickname bind:serverInput {phase} {phaseMsg} {notice} {status} {gtaDetail} {onDetect} {onPlay} webviewMsg={webviewMsg} />
       {#if phase === "error"}
         <div class="row"><button onclick={openCrash}>View error details</button></div>
       {/if}

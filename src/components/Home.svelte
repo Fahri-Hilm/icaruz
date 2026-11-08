@@ -9,6 +9,7 @@
   export let gtaDetail: string;
   export let onDetect: () => void;
   export let onPlay: () => void;
+  export let webviewMsg = "";
 
   $: busy = phase === "checking" || phase === "preparing" || phase === "launching";
   $: viewState = phase === "error" ? "error" : phase === "running" ? "success" : busy ? "loading" : !gtaPath ? "empty" : "ready";
@@ -16,6 +17,14 @@
 
 <h1>Open ICARUZ, pick a server, press Play</h1>
 <p class="muted">Local game files stay untouched until you approve a change.</p>
+
+{#if webviewMsg}
+  <section class="card" aria-label="WebView2 missing">
+    <h2>WebView2 belum terpasang</h2>
+    <p>{webviewMsg}</p>
+    <p class="muted">Cari "WebView2 Runtime installer" di situs Microsoft, install, lalu buka ulang ICARUZ. Ukuran sekitar 100-180 MB, sekali saja.</p>
+  </section>
+{/if}
 
 <section class="card" aria-label="Quick play">
   <h2>Quick play (SA-MP 0.3.7-R5)</h2>

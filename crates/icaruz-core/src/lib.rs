@@ -7,6 +7,7 @@ pub mod launch;
 pub mod repair;
 pub mod runtime;
 pub mod storage;
+pub mod webview;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};

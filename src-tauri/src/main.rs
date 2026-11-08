@@ -1,6 +1,6 @@
 use icaruz_core::{
-    adapters, content, crash, detector, launch, repair, storage, validate_nickname, ClientKind,
-    ClientStatus, GameInstall, LaunchPhase, LaunchRequest, LauncherStatus,
+    adapters, content, crash, detector, launch, repair, storage, validate_nickname, webview,
+    ClientKind, ClientStatus, GameInstall, LaunchPhase, LaunchRequest, LauncherStatus,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -165,6 +165,11 @@ async fn launch_game(
     }
 }
 
+#[tauri::command]
+fn webview_status() -> webview::WebviewStatus {
+    webview::webview_status()
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter("icaruz=debug")
@@ -180,7 +185,8 @@ fn main() {
             launch_game,
             download_client,
             repair_check,
-            crash_report
+            crash_report,
+            webview_status
         ])
         .run(tauri::generate_context!())
         .expect("ICARUZ failed to start");
