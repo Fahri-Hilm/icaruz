@@ -28,8 +28,7 @@
       "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English", "Indonesian"],
-        "displayLanguageSelector": false
+        "languages": ["English"]
       }
     }
   }
