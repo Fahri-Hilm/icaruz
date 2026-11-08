@@ -1,7 +1,13 @@
 pub mod adapters;
+pub mod content;
+pub mod crash;
 pub mod detector;
+pub mod discovery;
 pub mod launch;
+pub mod repair;
+pub mod runtime;
 pub mod storage;
+pub mod workspace;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

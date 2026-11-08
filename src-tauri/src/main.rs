@@ -1,6 +1,6 @@
 use icaruz_core::{
-    adapters, detector, launch, storage, validate_nickname, ClientKind, ClientStatus, GameInstall,
-    LaunchPhase, LaunchRequest, LauncherStatus,
+    adapters, content, crash, detector, launch, repair, storage, validate_nickname, ClientKind,
+    ClientStatus, GameInstall, LaunchPhase, LaunchRequest, LauncherStatus,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;

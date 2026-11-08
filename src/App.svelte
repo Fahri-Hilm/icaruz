@@ -1,5 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Home from "./components/Home.svelte";
+  import Servers from "./components/Servers.svelte";
+  import Library from "./components/Library.svelte";
+  import Settings from "./components/Settings.svelte";
+  import RepairDialog from "./components/RepairDialog.svelte";
+  import CrashDialog from "./components/CrashDialog.svelte";
 
   type Page = "home" | "servers" | "library" | "settings";
   type Phase = "idle" | "checking" | "preparing" | "launching" | "running" | "error";
@@ -13,26 +19,63 @@
   let phase: Phase = "idle";
   let phaseMsg = "";
   let notice = "";
+  let saveMsg = "";
+  let showRepair = false;
+  let showCrash = false;
+  let repairState = "empty";
+  let repairMsg = "";
+  let gamingMode = false;
 
   async function invoke(cmd: string, args?: unknown) {
     const mod = await import("@tauri-apps/api/core");
     return mod.invoke(cmd, args as Record<string, unknown>);
   }
 
+  function applyGamingMode(on: boolean) {
+    gamingMode = on;
+    try {
+      localStorage.setItem("icaruz-gaming-mode", on ? "1" : "0");
+    } catch {
+      // storage blocked, keep in memory only
+    }
+    document.body.classList.toggle("gaming", on);
+  }
+
+  $: if (typeof document !== "undefined") {
+    document.body.classList.toggle("gaming", gamingMode);
+  }
+
   onMount(async () => {
     try {
-      const data = (await invoke("get_status")) as { needs_attention?: string };
+      gamingMode = localStorage.getItem("icaruz-gaming-mode") === "1";
+    } catch {
+      gamingMode = false;
+    }
+    document.body.classList.toggle("gaming", gamingMode);
+    try {
+      const data = (await invoke("get_status")) as { needs_attention?: string; nickname?: string };
       status = "Local core ready.";
       notice = data.needs_attention ?? "";
+      if (data.nickname) nickname = data.nickname;
     } catch {
       status = "Tauri IPC not available in browser preview.";
       notice = "GTA San Andreas folder not set yet.";
+    }
+    try {
+      const savedNick = localStorage.getItem("icaruz-nick");
+      if (savedNick) nickname = savedNick;
+      const savedGta = localStorage.getItem("icaruz-gta-path");
+      if (savedGta) gtaPath = savedGta;
+    } catch {
+      // preview without storage, keep defaults
     }
   });
 
   async function onDetect() {
     phase = "checking";
     phaseMsg = "Checking gta_sa.exe...";
+    repairState = "loading";
+    repairMsg = "";
     try {
       const info = (await invoke("detect_gta", { path: gtaPath })) as {
         valid: boolean;
@@ -40,12 +83,21 @@
         exe_sha256: string;
       };
       gtaDetail = `${info.detail} sha256 ${String(info.exe_sha256).slice(0, 16)}...`;
-      notice = info.valid ? "" : "Version game belum cocok. Periksa file sebelum Play.";
+      notice = info.valid ? "" : "Game version looks off. Check files before Play.";
+      repairState = info.valid ? "success" : "error";
+      repairMsg = info.valid ? "Check passed. No change made." : "Check found a mismatch. Nothing was changed yet.";
       phase = "idle";
       phaseMsg = "";
+      try {
+        localStorage.setItem("icaruz-gta-path", gtaPath);
+      } catch {
+        // ignore
+      }
     } catch (e) {
       phase = "error";
       phaseMsg = String(e);
+      repairState = "error";
+      repairMsg = String(e);
     }
   }
 
@@ -53,7 +105,7 @@
     phase = "checking";
     phaseMsg = "Checking nickname and address...";
     try {
-      if (!gtaPath) throw "Set GTA folder dulu di Library atau Home.";
+      if (!gtaPath) throw "Set GTA folder first in Library or Home.";
       phase = "preparing";
       phaseMsg = "Preparing SA-MP 0.3.7-R5 plan...";
       const plan = (await invoke("plan_launch", {
@@ -72,94 +124,71 @@
     }
   }
 
-  function goServers() {
-    page = "servers";
+  async function onSaveNickname() {
+    saveMsg = "Saving...";
+    try {
+      await invoke("set_nickname", { nick: nickname });
+      saveMsg = "Saved to local database.";
+    } catch {
+      try {
+        localStorage.setItem("icaruz-nick", nickname);
+        saveMsg = "Preview mode: saved to browser storage only.";
+      } catch {
+        saveMsg = "Save failed in preview. Tauri IPC is missing.";
+      }
+    }
+  }
+
+  function openRepair() {
+    showCrash = false;
+    showRepair = true;
+  }
+
+  function openCrash() {
+    showRepair = false;
+    showCrash = true;
   }
 </script>
 
-<div class="shell">
+<div class="shell" data-gaming={gamingMode ? "on" : "off"}>
   <nav class="side" aria-label="Primary">
     <div class="brand">ICARUZ</div>
     <button class="nav-item" aria-current={page === "home" ? "page" : undefined} onclick={() => (page = "home")}>Home</button>
-    <button class="nav-item" aria-current={page === "servers" ? "page" : undefined} onclick={goServers}>Servers</button>
+    <button class="nav-item" aria-current={page === "servers" ? "page" : undefined} onclick={() => (page = "servers")}>Servers</button>
     <button class="nav-item" aria-current={page === "library" ? "page" : undefined} onclick={() => (page = "library")}>Library</button>
     <button class="nav-item" aria-current={page === "settings" ? "page" : undefined} onclick={() => (page = "settings")}>Settings</button>
-    <div class="muted" style="margin-top:auto; padding: 10px;">Developed by Fajuu</div>
+    <div class="side-foot">
+      <label class="game-check"><input type="checkbox" checked={gamingMode} onchange={(e) => applyGamingMode(e.currentTarget.checked)} /> Gaming mode</label>
+      <div class="muted">Developed by Fajuu</div>
+    </div>
   </nav>
 
   <main class="main">
     {#if page === "home"}
-      <h1>Open ICARUZ, pick a server, press Play</h1>
-      <p class="muted">Local game files stay untouched until you approve a change.</p>
-
-      <section class="card" aria-label="Quick play">
-        <h2>Quick play (SA-MP 0.3.7-R5)</h2>
-        <div class="row">
-          <label for="gta">GTA folder</label>
-          <input id="gta" bind:value={gtaPath} placeholder="D:/Games/GTA San Andreas" />
-          <button onclick={onDetect} disabled={phase === "checking"}>Check GTA</button>
-        </div>
-        {#if gtaDetail}<p class="muted">{gtaDetail}</p>{/if}
-        <div class="row">
-          <label for="nick2">Nickname</label>
-          <input id="nick2" bind:value={nickname} minlength={3} maxlength={24} />
-          <label for="srv">Server</label>
-          <input id="srv" bind:value={serverInput} placeholder="127.0.0.1:7777" />
-          <button class="primary" onclick={onPlay} disabled={phase === "launching" || phase === "preparing"}>Play</button>
-        </div>
-        <p role="status">Phase: {phase}{phaseMsg ? `, ${phaseMsg}` : ""}</p>
-        {#if notice}<p>{notice}</p>{/if}
-      </section>
-
-      <section class="card" aria-label="Diagnostics">
-        <h2>Local status</h2>
-        <p class="muted">{status}</p>
-      </section>
+      <Home bind:gtaPath bind:nickname bind:serverInput {phase} {phaseMsg} {notice} {status} {gtaDetail} {onDetect} {onPlay} />
+      {#if phase === "error"}
+        <div class="row"><button onclick={openCrash}>View error details</button></div>
+      {/if}
     {/if}
 
     {#if page === "servers"}
-      <h1>Servers</h1>
-      <div class="row">
-        <label for="q">Direct connect</label>
-        <input id="q" bind:value={serverInput} placeholder="IP:port" />
-        <button class="primary" onclick={onPlay}>Join and Play</button>
-      </div>
-      <div class="card" role="status">
-        <h2>No server list yet in P2</h2>
-        <p class="muted">P2 focuses on direct connect. Discovery ships in P3 with cache and offline state.</p>
-      </div>
-      <p role="status">Phase: {phase}{phaseMsg ? `, ${phaseMsg}` : ""}</p>
+      <Servers bind:serverInput {phase} {phaseMsg} {onPlay} />
     {/if}
 
     {#if page === "library"}
-      <h1>Library</h1>
-      <section class="card">
-        <h2>GTA install</h2>
-        <div class="row">
-          <input bind:value={gtaPath} placeholder="D:/Games/GTA San Andreas" aria-label="GTA folder" />
-          <button onclick={onDetect}>Validate</button>
-        </div>
-        {#if gtaDetail}<p class="muted">{gtaDetail}</p>{/if}
-      </section>
-      <section class="card">
-        <h2>Clients</h2>
-        <p class="muted">P2 wires SA-MP 0.3.7-R5. 0.3DL and open.mp show honest pending state until P3.</p>
-      </section>
+      <Library bind:gtaPath {gtaDetail} {phase} {phaseMsg} {onDetect} />
+      <div class="row"><button onclick={openRepair}>Open repair</button></div>
     {/if}
 
     {#if page === "settings"}
-      <h1>Settings</h1>
-      <section class="card">
-        <h2>Profile</h2>
-        <div class="row">
-          <label for="nick">Nickname</label>
-          <input id="nick" bind:value={nickname} minlength={3} maxlength={24} />
-        </div>
-      </section>
-      <section class="card">
-        <h2>About</h2>
-        <p>ICARUZ launcher. Developed by Fajuu.</p>
-      </section>
+      <Settings bind:nickname bind:gamingMode {saveMsg} {onSaveNickname} onOpenRepair={openRepair} onOpenCrash={openCrash} />
     {/if}
   </main>
+
+  {#if showRepair}
+    <RepairDialog {gtaPath} {repairState} {repairMsg} onClose={() => (showRepair = false)} onValidate={onDetect} />
+  {/if}
+  {#if showCrash}
+    <CrashDialog errorText={phase === "error" ? phaseMsg : ""} onClose={() => (showCrash = false)} onOpenRepair={openRepair} />
+  {/if}
 </div>
