@@ -1,0 +1,5 @@
+# Cross-compile Windows dari Linux tanpa root.
+# Butuh: rustup target add x86_64-pc-windows-gnu + zig di ~/.local/zig.
+# Wrapper: ~/.local/bin/zig-cc-windows (zig cc -target x86_64-windows-gnu).
+[target.x86_64-pc-windows-gnu]
+linker = "/home/iqaruz/.local/bin/zig-cc-windows"
