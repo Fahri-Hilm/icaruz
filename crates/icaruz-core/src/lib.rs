@@ -1,3 +1,8 @@
+pub mod adapters;
+pub mod detector;
+pub mod launch;
+pub mod storage;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -43,8 +48,23 @@ pub struct ClientStatus {
     pub path: Option<PathBuf>,
 }
 
-// Known clean GTA SA 1.0 US checksum prefix check lives in detector.
-// We never modify the original game files destructively.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchRequest {
+    pub client: ClientKind,
+    pub gta_path: PathBuf,
+    pub server: String,
+    pub port: u16,
+    pub nick: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LaunchPhase {
+    Checking,
+    Preparing,
+    Launching,
+    Running { pid: u32 },
+}
+
 pub fn data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -55,12 +75,19 @@ pub fn data_dir() -> PathBuf {
     PathBuf::from("./data")
 }
 
+pub fn db_path() -> PathBuf {
+    data_dir().join("icaruz.db")
+}
+
 pub fn validate_nickname(nick: &str) -> Result<(), String> {
     let len = nick.chars().count();
     if !(3..=24).contains(&len) {
         return Err("Nickname must be 3 to 24 characters.".to_string());
     }
-    if !nick.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '[' || c == ']') {
+    if !nick
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '[' || c == ']')
+    {
         return Err("Nickname allows letters, numbers, underscore and brackets only.".to_string());
     }
     Ok(())

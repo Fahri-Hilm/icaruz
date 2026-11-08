@@ -1,24 +1,33 @@
-use icaruz_core::{validate_nickname, ClientKind, ClientStatus, GameInstall, LauncherStatus};
+use icaruz_core::{
+    adapters, detector, launch, storage, validate_nickname, ClientKind, ClientStatus, GameInstall,
+    LaunchPhase, LaunchRequest, LauncherStatus,
+};
 use std::path::PathBuf;
+use std::sync::Mutex;
+use tauri::State;
 
-fn default_clients() -> Vec<ClientStatus> {
+struct RunState(Mutex<Option<u32>>);
+
+fn default_clients(gta_path: Option<&PathBuf>) -> Vec<ClientStatus> {
     vec![
         ClientStatus {
             kind: ClientKind::Samp037R5,
-            installed: false,
-            version: "not installed".to_string(),
-            path: None,
+            installed: gta_path
+                .map(|p| p.join("samp.exe").exists())
+                .unwrap_or(false),
+            version: "P2 adapter".to_string(),
+            path: gta_path.map(|p| p.join("samp.exe")),
         },
         ClientStatus {
             kind: ClientKind::Samp03DL,
             installed: false,
-            version: "not installed".to_string(),
+            version: "ships in P3".to_string(),
             path: None,
         },
         ClientStatus {
             kind: ClientKind::OpenMp1x,
             installed: false,
-            version: "not installed".to_string(),
+            version: "ships in P3".to_string(),
             path: None,
         },
     ]
@@ -26,9 +35,11 @@ fn default_clients() -> Vec<ClientStatus> {
 
 #[tauri::command]
 fn get_status() -> LauncherStatus {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
     LauncherStatus {
         gta: None,
-        clients: default_clients(),
+        clients: default_clients(None),
         nickname: "Player".to_string(),
         needs_attention: Some("GTA San Andreas folder not set yet.".to_string()),
     }
@@ -36,41 +47,76 @@ fn get_status() -> LauncherStatus {
 
 #[tauri::command]
 fn detect_gta(path: String) -> Result<GameInstall, String> {
-    let p = PathBuf::from(&path);
-    let exe = p.join("gta_sa.exe");
-    if !exe.exists() {
-        return Err("gta_sa.exe not found in that folder.".to_string());
-    }
-    Ok(GameInstall {
-        gta_path: p,
-        exe_version: "unknown (hash check pending)".to_string(),
-        exe_sha256: "pending".to_string(),
-        valid: false,
-        detail: "File found. Hash validation runs next.".to_string(),
-    })
+    let info = detector::inspect_gta(std::path::Path::new(&path))?;
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    let _ = storage::save_setting(&db, "gta_path", &path);
+    Ok(info)
 }
 
 #[tauri::command]
 fn set_nickname(nick: String) -> Result<String, String> {
     validate_nickname(&nick)?;
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    let _ = storage::save_setting(&db, "nickname", &nick);
     Ok(nick)
+}
+
+#[tauri::command]
+fn plan_launch(req: LaunchRequest) -> Result<adapters::AdapterPlan, String> {
+    let _ = storage::init_db(&icaruz_core::db_path());
+    adapters::plan_launch(&req.client, &req.gta_path, &req.server, req.port, &req.nick)
 }
 
 #[tauri::command]
 fn build_launch_args(ip: String, port: u16, nick: String) -> Result<Vec<String>, String> {
     validate_nickname(&nick)?;
-    if ip.trim().is_empty() {
-        return Err("Server address is empty.".to_string());
-    }
+    let (host, p) = launch::parse_server(&ip, port)?;
     Ok(vec![
         "-c".to_string(),
         "-h".to_string(),
-        ip,
+        host,
         "-p".to_string(),
-        port.to_string(),
+        p.to_string(),
         "-n".to_string(),
         nick,
     ])
+}
+
+#[tauri::command(async)]
+async fn launch_game(
+    req: LaunchRequest,
+    state: State<'_, RunState>,
+) -> Result<LaunchPhase, String> {
+    let plan = adapters::plan_launch(&req.client, &req.gta_path, &req.server, req.port, &req.nick)?;
+    if !plan.exe.exists() {
+        return Err(format!(
+            "{} not found. Install {} first. Launcher changed nothing.",
+            plan.exe.display(),
+            req.client.label()
+        ));
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = &plan;
+        return Err("Game launch needs Windows. Dry run plan OK.".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use tokio::process::Command;
+        let mut cmd = Command::new(&plan.exe);
+        cmd.args(&plan.args);
+        cmd.current_dir(&req.gta_path);
+        let child = cmd.spawn().map_err(|e| format!("Launch failed: {e}"))?;
+        let pid = child.id().unwrap_or(0);
+        if let Ok(mut slot) = state.0.lock() {
+            *slot = Some(pid);
+        }
+        // Detach: forget handle, OS owns process. Game lives if UI closes.
+        std::mem::forget(child);
+        Ok(LaunchPhase::Running { pid })
+    }
 }
 
 fn main() {
@@ -78,11 +124,14 @@ fn main() {
         .with_env_filter("icaruz=debug")
         .init();
     tauri::Builder::default()
+        .manage(RunState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             get_status,
             detect_gta,
             set_nickname,
-            build_launch_args
+            build_launch_args,
+            plan_launch,
+            launch_game
         ])
         .run(tauri::generate_context!())
         .expect("ICARUZ failed to start");

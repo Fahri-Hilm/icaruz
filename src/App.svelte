@@ -2,37 +2,78 @@
   import { onMount } from "svelte";
 
   type Page = "home" | "servers" | "library" | "settings";
+  type Phase = "idle" | "checking" | "preparing" | "launching" | "running" | "error";
+
   let page: Page = "home";
-  let status: string = "Checking local setup...";
+  let status = "Checking local setup...";
   let gtaPath = "";
+  let gtaDetail = "";
   let nickname = "Player";
+  let serverInput = "127.0.0.1:7777";
+  let phase: Phase = "idle";
+  let phaseMsg = "";
   let notice = "";
-  let servers: Array<{ name: string; ip: string; port: number; players: string }> = [];
-  let serversState: "empty" | "loading" | "ready" = "empty";
+
+  async function invoke(cmd: string, args?: unknown) {
+    const mod = await import("@tauri-apps/api/core");
+    return mod.invoke(cmd, args as Record<string, unknown>);
+  }
 
   onMount(async () => {
     try {
-      const mod = await import("@tauri-apps/api/core");
-      const data = await mod.invoke("get_status");
-      status = JSON.stringify(data);
-      if (typeof data === "object" && data !== null && "needs_attention" in data) {
-        notice = String((data as { needs_attention: unknown }).needs_attention ?? "");
-      }
+      const data = (await invoke("get_status")) as { needs_attention?: string };
+      status = "Local core ready.";
+      notice = data.needs_attention ?? "";
     } catch {
       status = "Tauri IPC not available in browser preview.";
       notice = "GTA San Andreas folder not set yet.";
     }
   });
 
-  function browseServers() {
-    page = "servers";
-    if (serversState === "empty") {
-      serversState = "loading";
-      setTimeout(() => {
-        servers = [];
-        serversState = "empty";
-      }, 400);
+  async function onDetect() {
+    phase = "checking";
+    phaseMsg = "Checking gta_sa.exe...";
+    try {
+      const info = (await invoke("detect_gta", { path: gtaPath })) as {
+        valid: boolean;
+        detail: string;
+        exe_sha256: string;
+      };
+      gtaDetail = `${info.detail} sha256 ${String(info.exe_sha256).slice(0, 16)}...`;
+      notice = info.valid ? "" : "Version game belum cocok. Periksa file sebelum Play.";
+      phase = "idle";
+      phaseMsg = "";
+    } catch (e) {
+      phase = "error";
+      phaseMsg = String(e);
     }
+  }
+
+  async function onPlay() {
+    phase = "checking";
+    phaseMsg = "Checking nickname and address...";
+    try {
+      if (!gtaPath) throw "Set GTA folder dulu di Library atau Home.";
+      phase = "preparing";
+      phaseMsg = "Preparing SA-MP 0.3.7-R5 plan...";
+      const plan = (await invoke("plan_launch", {
+        req: { client: "Samp037R5", gta_path: gtaPath, server: serverInput, port: 7777, nick: nickname },
+      })) as { exe: string; args: string[] };
+      phase = "launching";
+      phaseMsg = `Launching ${plan.exe}...`;
+      const res = await invoke("launch_game", {
+        req: { client: "Samp037R5", gta_path: gtaPath, server: serverInput, port: 7777, nick: nickname },
+      });
+      phase = "running";
+      phaseMsg = `Running: ${JSON.stringify(res)}`;
+    } catch (e) {
+      phase = "error";
+      phaseMsg = String(e);
+    }
+  }
+
+  function goServers() {
+    page = "servers";
   }
 </script>
 
@@ -40,7 +81,7 @@
   <nav class="side" aria-label="Primary">
     <div class="brand">ICARUZ</div>
     <button class="nav-item" aria-current={page === "home" ? "page" : undefined} onclick={() => (page = "home")}>Home</button>
-    <button class="nav-item" aria-current={page === "servers" ? "page" : undefined} onclick={browseServers}>Servers</button>
+    <button class="nav-item" aria-current={page === "servers" ? "page" : undefined} onclick={goServers}>Servers</button>
     <button class="nav-item" aria-current={page === "library" ? "page" : undefined} onclick={() => (page = "library")}>Library</button>
     <button class="nav-item" aria-current={page === "settings" ? "page" : undefined} onclick={() => (page = "settings")}>Settings</button>
     <div class="muted" style="margin-top:auto; padding: 10px;">Developed by Fajuu</div>
@@ -51,23 +92,24 @@
       <h1>Open ICARUZ, pick a server, press Play</h1>
       <p class="muted">Local game files stay untouched until you approve a change.</p>
 
-      {#if notice}
-        <section class="card" aria-label="Setup status">
-          <h2>Needs attention</h2>
-          <p>{notice}</p>
-          <div class="row">
-            <label for="gta">GTA folder</label>
-            <input id="gta" bind:value={gtaPath} placeholder="D:/Games/GTA San Andreas" />
-            <button>Use this folder</button>
-          </div>
-        </section>
-      {:else}
-        <section class="card" aria-label="Ready to play">
-          <h2>Ready</h2>
-          <p class="muted">No server selected yet. Browse the list to pick one.</p>
-          <button class="primary" onclick={browseServers}>Browse servers</button>
-        </section>
-      {/if}
+      <section class="card" aria-label="Quick play">
+        <h2>Quick play (SA-MP 0.3.7-R5)</h2>
+        <div class="row">
+          <label for="gta">GTA folder</label>
+          <input id="gta" bind:value={gtaPath} placeholder="D:/Games/GTA San Andreas" />
+          <button onclick={onDetect} disabled={phase === "checking"}>Check GTA</button>
+        </div>
+        {#if gtaDetail}<p class="muted">{gtaDetail}</p>{/if}
+        <div class="row">
+          <label for="nick2">Nickname</label>
+          <input id="nick2" bind:value={nickname} minlength={3} maxlength={24} />
+          <label for="srv">Server</label>
+          <input id="srv" bind:value={serverInput} placeholder="127.0.0.1:7777" />
+          <button class="primary" onclick={onPlay} disabled={phase === "launching" || phase === "preparing"}>Play</button>
+        </div>
+        <p role="status">Phase: {phase}{phaseMsg ? `, ${phaseMsg}` : ""}</p>
+        {#if notice}<p>{notice}</p>{/if}
+      </section>
 
       <section class="card" aria-label="Diagnostics">
         <h2>Local status</h2>
@@ -78,37 +120,30 @@
     {#if page === "servers"}
       <h1>Servers</h1>
       <div class="row">
-        <label for="q">Search</label>
-        <input id="q" placeholder="Name, gamemode, or IP:port" />
-        <button>Join by IP:port</button>
+        <label for="q">Direct connect</label>
+        <input id="q" bind:value={serverInput} placeholder="IP:port" />
+        <button class="primary" onclick={onPlay}>Join and Play</button>
       </div>
-
-      {#if serversState === "loading"}
-        <div class="card" role="status"><p>Loading server list...</p></div>
-      {:else if serversState === "empty"}
-        <div class="card" role="status">
-          <h2>No servers loaded</h2>
-          <p class="muted">Discovery has not returned data yet. Cached entries will appear here with their age when offline.</p>
-          <button>Retry discovery</button>
-        </div>
-      {:else}
-        <ul>
-          {#each servers as s}
-            <li>{s.name} {s.ip}:{s.port} {s.players}</li>
-          {/each}
-        </ul>
-      {/if}
+      <div class="card" role="status">
+        <h2>No server list yet in P2</h2>
+        <p class="muted">P2 focuses on direct connect. Discovery ships in P3 with cache and offline state.</p>
+      </div>
+      <p role="status">Phase: {phase}{phaseMsg ? `, ${phaseMsg}` : ""}</p>
     {/if}
 
     {#if page === "library"}
       <h1>Library</h1>
       <section class="card">
         <h2>GTA install</h2>
-        <p class="muted">Set the folder containing gta_sa.exe. Validation checks version and hash before anything else runs.</p>
+        <div class="row">
+          <input bind:value={gtaPath} placeholder="D:/Games/GTA San Andreas" aria-label="GTA folder" />
+          <button onclick={onDetect}>Validate</button>
+        </div>
+        {#if gtaDetail}<p class="muted">{gtaDetail}</p>{/if}
       </section>
       <section class="card">
         <h2>Clients</h2>
-        <p class="muted">SA-MP 0.3.7-R5, SA-MP 0.3DL, open.mp 1.x appear here after detection. Each client keeps an isolated runtime.</p>
+        <p class="muted">P2 wires SA-MP 0.3.7-R5. 0.3DL and open.mp show honest pending state until P3.</p>
       </section>
     {/if}
 
