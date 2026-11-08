@@ -1,7 +1,7 @@
 # Wine check: Windows target tanpa root
 
 Validasi kode Rust untuk Windows dari Linux pakai zig + Wine.
-Hasil terakhir: 38/38 unit test PASS sebagai `.exe` di Wine 11.
+Hasil terakhir: 42/42 unit test PASS sebagai `.exe` di Wine 11.
 
 ## Syarat sekali saja
 1. `rustup target add x86_64-pc-windows-gnu`
@@ -10,6 +10,9 @@ Hasil terakhir: 38/38 unit test PASS sebagai `.exe` di Wine 11.
    - `zig-cc-windows`: `zig cc -target x86_64-windows-gnu`, buang flag
      `--target=x86_64-pc-windows-gnu -lmsvcrt -lpthread -l:libpthread.a
      -lmingwex -lmingw32 -lgcc -lgcc_eh` (zig sediakan sendiri).
+     `-lwindows.*` diganti archive stabil `/tmp/opencode/libwindows_stable.a`
+     (salinan `libwindows.0.52.0.a` dari crate `windows_x86_64_gnu`;
+     kalau versi `windows-sys` naik, salin ulang).
    - `zig-ar-windows`: `zig ar`.
    - `x86_64-w64-mingw32-dlltool`: `zig dlltool` (rustc butuh untuk raw-dylib).
 4. Bangun libunwind sekali: `zig build-lib libunwind/src/libunwind.cpp`

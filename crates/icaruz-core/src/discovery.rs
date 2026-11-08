@@ -14,11 +14,28 @@ pub struct ServerEntry {
     pub hostname: Option<String>,
     pub players: Option<u16>,
     pub max_players: Option<u16>,
+    pub gamemode: Option<String>,
+    pub language: Option<String>,
+    pub passworded: bool,
+    pub omp: bool,
 }
 
 impl ServerEntry {
     pub fn key(&self) -> String {
         format!("{}:{}", self.address.to_lowercase(), self.port)
+    }
+    pub fn bare(address: impl Into<String>, port: u16) -> Self {
+        Self {
+            address: address.into(),
+            port,
+            hostname: None,
+            players: None,
+            max_players: None,
+            gamemode: None,
+            language: None,
+            passworded: false,
+            omp: false,
+        }
     }
 }
 
@@ -31,13 +48,7 @@ pub fn parse_masterlist_text(input: &str, fallback_port: u16) -> Vec<ServerEntry
             continue;
         }
         if let Ok((host, port)) = crate::launch::parse_server(t, fallback_port) {
-            out.push(ServerEntry {
-                address: host,
-                port,
-                hostname: None,
-                players: None,
-                max_players: None,
-            });
+            out.push(ServerEntry::bare(host, port));
         }
     }
     dedup_servers(out)
@@ -55,13 +66,7 @@ pub fn parse_masterlist_json(input: &str, fallback_port: u16) -> Result<Vec<Serv
         match item {
             serde_json::Value::String(s) => {
                 if let Ok((host, port)) = crate::launch::parse_server(s, fallback_port) {
-                    out.push(ServerEntry {
-                        address: host,
-                        port,
-                        hostname: None,
-                        players: None,
-                        max_players: None,
-                    });
+                    out.push(ServerEntry::bare(host, port));
                 }
             }
             serde_json::Value::Object(_) => {
@@ -77,23 +82,33 @@ pub fn parse_masterlist_json(input: &str, fallback_port: u16) -> Result<Vec<Serv
                     .unwrap_or(fallback_port);
                 if let Some(h) = host {
                     if let Ok((host2, port2)) = crate::launch::parse_server(h, port) {
-                        out.push(ServerEntry {
-                            address: host2,
-                            port: port2,
-                            hostname: item
-                                .get("hostname")
-                                .and_then(|x| x.as_str())
-                                .map(|x| x.to_string()),
-                            players: item
-                                .get("players")
-                                .and_then(|x| x.as_u64())
-                                .map(|x| x as u16),
-                            max_players: item
-                                .get("max_players")
-                                .or_else(|| item.get("maxplayers"))
-                                .and_then(|x| x.as_u64())
-                                .map(|x| x as u16),
-                        });
+                        let mut e = ServerEntry::bare(host2, port2);
+                        e.hostname = item
+                            .get("hostname")
+                            .and_then(|x| x.as_str())
+                            .map(|x| x.to_string());
+                        e.players = item
+                            .get("players")
+                            .and_then(|x| x.as_u64())
+                            .map(|x| x as u16);
+                        e.max_players = item
+                            .get("max_players")
+                            .or_else(|| item.get("maxplayers"))
+                            .and_then(|x| x.as_u64())
+                            .map(|x| x as u16);
+                        e.gamemode = item
+                            .get("gamemode")
+                            .and_then(|x| x.as_str())
+                            .map(|x| x.to_string());
+                        e.language = item
+                            .get("language")
+                            .and_then(|x| x.as_str())
+                            .map(|x| x.to_string());
+                        e.passworded = item
+                            .get("passworded")
+                            .and_then(|x| x.as_bool())
+                            .unwrap_or(false);
+                        out.push(e);
                     }
                 }
             }
@@ -339,6 +354,149 @@ impl QuerySource for MasterlistProvider {
     }
 }
 
+// open.mp public server API shape (verified live):
+// [{ip:"host:port", hn, pc, pm, gm, la, pa, vn, omp, pr}]
+pub fn parse_openmp_api(input: &str) -> Result<Vec<ServerEntry>, String> {
+    let v: serde_json::Value =
+        serde_json::from_str(input).map_err(|e| format!("open.mp API invalid: {e}"))?;
+    let arr = v
+        .as_array()
+        .ok_or("open.mp API must be an array.".to_string())?;
+    let mut out = Vec::new();
+    for item in arr {
+        let ip = item.get("ip").and_then(|x| x.as_str()).unwrap_or("");
+        let (host, port) = match crate::launch::parse_server(ip, 7777) {
+            Ok(x) => x,
+            Err(_) => continue,
+        };
+        let mut e = ServerEntry::bare(host, port);
+        e.hostname = item
+            .get("hn")
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string());
+        e.players = item.get("pc").and_then(|x| x.as_u64()).map(|x| x as u16);
+        e.max_players = item.get("pm").and_then(|x| x.as_u64()).map(|x| x as u16);
+        e.gamemode = item
+            .get("gm")
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string());
+        e.language = item
+            .get("la")
+            .and_then(|x| x.as_str())
+            .map(|x| x.to_string());
+        e.passworded = item.get("pa").and_then(|x| x.as_bool()).unwrap_or(false);
+        e.omp = item.get("omp").and_then(|x| x.as_bool()).unwrap_or(true);
+        out.push(e);
+    }
+    Ok(dedup_servers(out))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ServerInfo {
+    pub address: String,
+    pub port: u16,
+    pub passworded: bool,
+    pub players: u16,
+    pub max_players: u16,
+    pub hostname: String,
+    pub gamemode: String,
+    pub language: String,
+    pub ping_ms: u64,
+}
+
+fn read_str(buf: &[u8], pos: &mut usize) -> Result<String, String> {
+    if *pos + 4 > buf.len() {
+        return Err("Query reply cut in string length.".to_string());
+    }
+    let len = u32::from_le_bytes([buf[*pos], buf[*pos + 1], buf[*pos + 2], buf[*pos + 3]]) as usize;
+    *pos += 4;
+    if *pos + len > buf.len() {
+        return Err("Query reply cut in string body.".to_string());
+    }
+    let s = String::from_utf8_lossy(&buf[*pos..*pos + len]).to_string();
+    *pos += len;
+    Ok(s)
+}
+
+// Full SA-MP 'i' query with parse and round-trip latency.
+pub async fn query_server_info(
+    address: &str,
+    port: u16,
+    timeout_ms: u64,
+) -> Result<ServerInfo, String> {
+    use std::time::Instant;
+    use tokio::net::UdpSocket;
+    use tokio::time::timeout;
+    let ip: std::net::Ipv4Addr = address
+        .parse()
+        .map_err(|_| format!("Server query needs IPv4 address, got {address}."))?;
+    let sock = UdpSocket::bind("0.0.0.0:0")
+        .await
+        .map_err(|e| format!("UDP bind failed: {e}"))?;
+    let mut pkt = Vec::with_capacity(11);
+    pkt.extend_from_slice(b"SAMP");
+    pkt.extend_from_slice(&ip.octets());
+    pkt.extend_from_slice(&port.to_le_bytes());
+    pkt.push(b'i');
+    let start = Instant::now();
+    sock.send_to(&pkt, format!("{address}:{port}"))
+        .await
+        .map_err(|e| format!("UDP send failed: {e}"))?;
+    let mut buf = [0u8; 2048];
+    let (n, _) = timeout(Duration::from_millis(timeout_ms), sock.recv_from(&mut buf))
+        .await
+        .map_err(|_| format!("No reply in {timeout_ms}ms. Server may be offline."))?
+        .map_err(|e| format!("UDP recv failed: {e}"))?;
+    let ping_ms = start.elapsed().as_millis() as u64;
+    if n < 12 || &buf[0..4] != b"SAMP" {
+        return Err("Reply is not a SA-MP query answer.".to_string());
+    }
+    let mut pos = 11;
+    let passworded = buf[pos] != 0;
+    pos += 1;
+    if pos + 4 > n {
+        return Err("Reply too short for player counts.".to_string());
+    }
+    let players = u16::from_le_bytes([buf[pos], buf[pos + 1]]);
+    let max_players = u16::from_le_bytes([buf[pos + 2], buf[pos + 3]]);
+    pos += 4;
+    let hostname = read_str(&buf[..n], &mut pos)?;
+    let gamemode = read_str(&buf[..n], &mut pos).unwrap_or_default();
+    let language = read_str(&buf[..n], &mut pos).unwrap_or_default();
+    Ok(ServerInfo {
+        address: address.to_string(),
+        port,
+        passworded,
+        players,
+        max_players,
+        hostname,
+        gamemode,
+        language,
+        ping_ms,
+    })
+}
+
+// Fetch live open.mp server list with timeout, then parse.
+pub async fn fetch_openmp(url: &str, timeout_ms: u64) -> Result<Vec<ServerEntry>, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(timeout_ms))
+        .build()
+        .map_err(|e| format!("HTTP client failed: {e}"))?;
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Server list fetch failed: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("Server list HTTP {}.", res.status()));
+    }
+    let text = res
+        .text()
+        .await
+        .map_err(|e| format!("Server list read failed: {e}"))?;
+    parse_openmp_api(&text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,27 +526,9 @@ mod tests {
     #[test]
     fn dedup_case_insensitive_host() {
         let v = dedup_servers(vec![
-            ServerEntry {
-                address: "Play.Example.com".into(),
-                port: 7777,
-                hostname: None,
-                players: None,
-                max_players: None,
-            },
-            ServerEntry {
-                address: "play.example.com".into(),
-                port: 7777,
-                hostname: None,
-                players: None,
-                max_players: None,
-            },
-            ServerEntry {
-                address: "play.example.com".into(),
-                port: 7778,
-                hostname: None,
-                players: None,
-                max_players: None,
-            },
+            ServerEntry::bare("Play.Example.com", 7777),
+            ServerEntry::bare("play.example.com", 7777),
+            ServerEntry::bare("play.example.com", 7778),
         ]);
         assert_eq!(v.len(), 2);
     }
@@ -396,13 +536,7 @@ mod tests {
     #[test]
     fn cache_hit_and_invalidate() {
         let c = DiscoveryCache::new();
-        let v = vec![ServerEntry {
-            address: "127.0.0.1".into(),
-            port: 7777,
-            hostname: None,
-            players: None,
-            max_players: None,
-        }];
+        let v = vec![ServerEntry::bare("127.0.0.1", 7777)];
         assert!(c.get("k").is_none());
         c.put("k", v.clone());
         assert_eq!(c.get("k").unwrap(), v);
@@ -435,13 +569,7 @@ mod tests {
             n: "a",
             r: Err("down".into()),
         };
-        let dup = ServerEntry {
-            address: "127.0.0.1".into(),
-            port: 7777,
-            hostname: None,
-            players: None,
-            max_players: None,
-        };
+        let dup = ServerEntry::bare("127.0.0.1", 7777);
         let b = Stub {
             n: "b",
             r: Ok(vec![dup.clone(), dup]),
@@ -466,5 +594,45 @@ mod tests {
     async fn udp_rejects_hostname_honestly() {
         let r = query_server_udp("not-an-ip", 7777, 200).await;
         assert!(r.is_err());
+    }
+
+    #[test]
+    fn openmp_api_parses_live_shape() {
+        let v = parse_openmp_api(
+            r#"[{"ip":"10.0.0.9:7777","hn":"RP Test","pc":12,"pm":100,"gm":"roleplay","la":"English","pa":false,"vn":"omp 1.5","omp":true,"pr":false},"bad-item"]"#,
+        )
+        .unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].hostname.as_deref(), Some("RP Test"));
+        assert_eq!(v[0].players, Some(12));
+        assert_eq!(v[0].gamemode.as_deref(), Some("roleplay"));
+        assert!(parse_openmp_api("nope").is_err());
+    }
+
+    #[test]
+    fn info_parse_reads_fixture() {
+        // Header(11) + pw(1) + players(2) + max(2) + strings.
+        let mut raw = Vec::new();
+        raw.extend_from_slice(b"SAMP");
+        raw.extend_from_slice(&[127, 0, 0, 1]);
+        raw.extend_from_slice(&7777u16.to_le_bytes());
+        raw.push(b'i');
+        raw.push(0);
+        raw.extend_from_slice(&5u16.to_le_bytes());
+        raw.extend_from_slice(&100u16.to_le_bytes());
+        for s in ["My Server", "roleplay", "English"] {
+            raw.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            raw.extend_from_slice(s.as_bytes());
+        }
+        let mut pos = 11;
+        assert_eq!(raw[pos], 0);
+        pos += 1;
+        assert_eq!(u16::from_le_bytes([raw[pos], raw[pos + 1]]), 5);
+        pos += 4;
+        let n = raw.len();
+        assert_eq!(read_str(&raw[..n], &mut pos).unwrap(), "My Server");
+        assert_eq!(read_str(&raw[..n], &mut pos).unwrap(), "roleplay");
+        assert_eq!(read_str(&raw[..n], &mut pos).unwrap(), "English");
+        assert!(read_str(&raw[..n], &mut pos).is_err());
     }
 }

@@ -1,12 +1,18 @@
 use icaruz_core::{
-    adapters, content, crash, detector, launch, repair, storage, validate_nickname, webview,
-    ClientKind, ClientStatus, GameInstall, LaunchPhase, LaunchRequest, LauncherStatus,
+    adapters, autostart, content, crash, detector, discovery, launch, repair, storage,
+    validate_nickname, webview, ClientKind, ClientStatus, GameInstall, LaunchPhase, LaunchRequest,
+    LauncherStatus,
 };
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::State;
 
 struct RunState(Mutex<Option<u32>>);
+struct AppState {
+    cache: discovery::DiscoveryCache,
+}
+
+const OPENMP_API: &str = "https://api.open.mp/servers";
 
 fn default_clients(gta_path: Option<&PathBuf>) -> Vec<ClientStatus> {
     vec![
@@ -37,11 +43,25 @@ fn default_clients(gta_path: Option<&PathBuf>) -> Vec<ClientStatus> {
 fn get_status() -> LauncherStatus {
     let db = icaruz_core::db_path();
     let _ = storage::init_db(&db);
+    let nickname = storage::get_setting(&db, "nickname")
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| "Player".to_string());
+    let gta_path = storage::get_setting(&db, "gta_path").ok().flatten();
+    let gta = gta_path
+        .as_deref()
+        .and_then(|p| detector::inspect_gta(std::path::Path::new(p)).ok());
+    let clients = default_clients(gta.as_ref().map(|g| &g.gta_path));
+    let needs_attention = if gta.is_none() {
+        Some("GTA San Andreas folder not set yet.".to_string())
+    } else {
+        None
+    };
     LauncherStatus {
-        gta: None,
-        clients: default_clients(None),
-        nickname: "Player".to_string(),
-        needs_attention: Some("GTA San Andreas folder not set yet.".to_string()),
+        gta,
+        clients,
+        nickname,
+        needs_attention,
     }
 }
 
@@ -170,12 +190,132 @@ fn webview_status() -> webview::WebviewStatus {
     webview::webview_status()
 }
 
+#[tauri::command(async)]
+async fn discover_servers(
+    force: bool,
+    state: State<'_, AppState>,
+) -> Result<Vec<discovery::ServerEntry>, String> {
+    if force {
+        state.cache.invalidate("openmp");
+    }
+    if let Some(hit) = state.cache.get("openmp") {
+        return Ok(hit);
+    }
+    let v = discovery::fetch_openmp(OPENMP_API, 9000).await?;
+    state.cache.put("openmp", v.clone());
+    Ok(v)
+}
+
+#[tauri::command(async)]
+async fn query_server_info(
+    address: String,
+    port: u16,
+) -> Result<discovery::ServerInfo, String> {
+    discovery::query_server_info(&address, port, 2500).await
+}
+
+#[tauri::command]
+fn fav_list() -> Result<Vec<storage::Favorite>, String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    storage::list_favorites(&db)
+}
+
+#[tauri::command]
+fn fav_add(server: String, port: u16, label: String) -> Result<(), String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    let now = chrono_now();
+    storage::add_favorite(
+        &db,
+        &storage::Favorite {
+            server,
+            port,
+            label,
+            added_at: now,
+        },
+    )
+}
+
+#[tauri::command]
+fn fav_remove(server: String, port: u16) -> Result<(), String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    storage::remove_favorite(&db, &server, port)
+}
+
+#[tauri::command]
+fn hist_list(limit: i64) -> Result<Vec<storage::HistoryEntry>, String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    storage::list_history(&db, limit.clamp(1, 50))
+}
+
+#[tauri::command]
+fn hist_record(
+    server: String,
+    port: u16,
+    duration_secs: u64,
+    error: String,
+) -> Result<(), String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    let _ = storage::record_history(
+        &db,
+        &storage::HistoryEntry {
+            id: None,
+            server,
+            port,
+            started_at: chrono_now(),
+            duration_secs,
+            error,
+            detail: String::new(),
+        },
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn get_setting(key: String) -> Result<Option<String>, String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    storage::get_setting(&db, &key)
+}
+
+#[tauri::command]
+fn save_setting(key: String, value: String) -> Result<(), String> {
+    let db = icaruz_core::db_path();
+    let _ = storage::init_db(&db);
+    storage::save_setting(&db, &key, &value)
+}
+
+#[tauri::command]
+fn get_autostart() -> Result<autostart::AutostartStatus, String> {
+    autostart::get_autostart()
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool) -> Result<autostart::AutostartStatus, String> {
+    autostart::set_autostart(enabled)
+}
+
+fn chrono_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_default()
+}
+
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter("icaruz=debug")
         .init();
     tauri::Builder::default()
         .manage(RunState(Mutex::new(None)))
+        .manage(AppState {
+            cache: discovery::DiscoveryCache::new(),
+        })
         .invoke_handler(tauri::generate_handler![
             get_status,
             detect_gta,
@@ -186,7 +326,18 @@ fn main() {
             download_client,
             repair_check,
             crash_report,
-            webview_status
+            webview_status,
+            discover_servers,
+            query_server_info,
+            fav_list,
+            fav_add,
+            fav_remove,
+            hist_list,
+            hist_record,
+            get_setting,
+            save_setting,
+            get_autostart,
+            set_autostart
         ])
         .run(tauri::generate_context!())
         .expect("ICARUZ failed to start");

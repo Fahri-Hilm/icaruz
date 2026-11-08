@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+#[cfg(target_os = "windows")]
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +24,8 @@ pub fn webview_status() -> WebviewStatus {
         }
         WebviewStatus {
             installed: false,
-            detail: "WebView2 Runtime not found. Install it from Microsoft, then reopen ICARUZ.".to_string(),
+            detail: "WebView2 Runtime not found. Install it from Microsoft, then reopen ICARUZ."
+                .to_string(),
         }
     }
     #[cfg(not(target_os = "windows"))]
@@ -39,7 +41,10 @@ pub fn webview_status() -> WebviewStatus {
 fn candidate_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut push_app_dir = |base: &str| {
-        let app = PathBuf::from(base).join("Microsoft").join("EdgeWebView").join("Application");
+        let app = PathBuf::from(base)
+            .join("Microsoft")
+            .join("EdgeWebView")
+            .join("Application");
         if let Ok(rd) = std::fs::read_dir(&app) {
             for e in rd.flatten() {
                 let p = e.path();

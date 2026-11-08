@@ -1,4 +1,5 @@
 pub mod adapters;
+pub mod autostart;
 pub mod content;
 pub mod crash;
 pub mod detector;
